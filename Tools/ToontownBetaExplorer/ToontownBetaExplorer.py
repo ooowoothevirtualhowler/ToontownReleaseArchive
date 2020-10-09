@@ -1,7 +1,7 @@
 # =============================================================================
 # Toontown Beta Explorer
-# Author: Joey Ziolkowski
-# Date: 10/7/2020
+# Authors: Joey Ziolkowski, Ooowoo
+# Date: 10/9/2020
 #
 # Purpose: Loads Bam and DNA files from Toontown Online Beta (v1.0.5) for
 #          easy viewing. This tool must be ran with the same Python version
@@ -29,7 +29,12 @@ from DepthWriteTransition import *
 # Store a dictionary of actor files and their file path. This is used for loading animation.
 ACTOR_REFERENCE = {
     # Classic Characters
-    'mickey-1200': 'phase_4/models/char',
+    # There are actually 2 'mickey-1200' models; however,
+    # the one in phase_3 is the only one that needs to be
+    # referenced in this dict
+    # (see the Mickey special case below for more info
+    # about the other 'mickey-1200')
+    'mickey-1200': 'phase_3/models/char',
     'TT_MK-1500': 'phase_3/models/char',
     'minnie-1200': 'phase_4/models/char',
     'TT_D-1500': 'phase_6/models/char',
