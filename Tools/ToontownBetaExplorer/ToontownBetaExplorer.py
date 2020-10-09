@@ -29,12 +29,13 @@ from DepthWriteTransition import *
 # Store a dictionary of actor files and their file path. This is used for loading animation.
 ACTOR_REFERENCE = {
     # Classic Characters
-    'mickey-1200': 'phase_3/models/char',
+    'mickey-1200': 'phase_4/models/char',
     'TT_MK-1500': 'phase_3/models/char',
     'minnie-1200': 'phase_4/models/char',
     'TT_D-1500': 'phase_6/models/char',
     'TT_G-1500': 'phase_6/models/char',
     'TT_MN-1500': 'phase_6/models/char',
+    'donald-wheel-mod': 'phase_6/models/char',
     # Cogs
     'suitA-mod': 'phase_4/models/char',
     'suitB-mod': 'phase_4/models/char',
@@ -50,6 +51,9 @@ TOON_ACTOR_ELEMENTS = (
     ['head', 'torso', 'legs'],
     ['1000']
 )
+
+NON_ACTOR_SUBSTRINGS = ('-1500', '-1000', '-1200', '-500', '-250', '-800', '-400', '-mod', '-heads')
+
 
 def product(*args, **kwds):
     """
@@ -68,10 +72,24 @@ def product(*args, **kwds):
         result = [x+[y] for x in result for y in pool]
     return result
 
+
 # Generate cartesian product of TOON_ACTOR_ELEMENTS and append to ACTOR_REFERENCE to store all Toon base models.
 for element in product(*TOON_ACTOR_ELEMENTS):
-    baseModel = '-'.join(element) # Join all parts with '-'
-    ACTOR_REFERENCE[baseModel] = 'phase_3'
+    baseModel = '-'.join(element)  # Join all parts with '-'
+    ACTOR_REFERENCE[baseModel] = 'phase_3/models/char'
+
+
+# These are used for a special case to differentiate the 'book' toon animation from the book model
+TOON_BOOK_ANIM_PATHS = []
+TOON_BOOK_ANIMS = (
+    ['dogSS_Shorts', 'dogMM_Shorts', 'dogLL_Shorts', 'dogSS_Skirt', 'dogMM_Skirt', 'dogLL_Skirt'],
+    ['head', 'torso', 'legs'],
+    ['book']
+)
+# Generate cartesian product of TOON_BOOK_ANIMS and append to TOON_BOOK_ANIM_PATHS to store all Toon base models.
+for element in product(*TOON_BOOK_ANIMS):
+    baseModel = '-'.join(element)  # Join all parts with '-'
+    TOON_BOOK_ANIM_PATHS.append(baseModel)
 
 
 class ToontownBetaLoader:
@@ -102,15 +120,39 @@ class ToontownBetaLoader:
         Args:
             filePath (string): Path to Bam file to load.
         """
-        isAnimation = 0
+        isAnimation = 1
 
-        # First, we need to check if this Bam file is an animation. It's definitely not animation
-        if filePath[-8:-4] not in ('1500', '1000', '-500', '-250', '-800', '-400', '-mod'):
+        # First, we need to check if this Bam file is an animation.
+        for substr in NON_ACTOR_SUBSTRINGS:
+            if filePath.find(substr) > -1:
+                # It's definitely not an animation
+                isAnimation = 0
+        if isAnimation:
             for actorBase, actorPhase in ACTOR_REFERENCE.items():
-                if filePath.find(actorBase[:-4]) > -1:
-                    # If the beginning of the file name is found in the Actor Reference, treat
+                actorBaseShortened = actorBase
+                for substr in NON_ACTOR_SUBSTRINGS:
+                    removingIdx = actorBase.find(substr)
+                    if removingIdx > -1:
+                        actorBaseShortened = actorBase[:removingIdx]
+                if filePath.find(actorBaseShortened) > -1:
+                    # If the file name is found in the Actor Reference, treat
                     # this file as an animation
-                    isAnimation = 1
+
+                    # Special case for the 'book' animation on toons so it doesn't load
+                    # the book model
+                    if actorBaseShortened == 'book':
+                        for substr in TOON_BOOK_ANIM_PATHS:
+                            if filePath.find(substr) > -1:
+                                actorBase = substr[:-4] + '1000'
+                                actorPhase = 'phase_3/models/char'
+                    # Special case for Mickey's animations; both ToonTag Mickey
+                    # and the early version of normal Mickey share the same animation
+                    # filenames so we have to differentiate them based on the
+                    # phase file they're in
+                    elif actorBaseShortened == 'TT_MK':
+                        if filePath.find('phase_4') > -1:
+                            actorBase = 'mickey-1200'
+                            actorPhase = 'phase_4/models/char'
                     geom = Actor.Actor(actorPhase + '/' + actorBase, {'anim': filePath})
                     geom.loop('anim')
                     break
