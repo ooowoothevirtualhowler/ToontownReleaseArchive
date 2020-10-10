@@ -19,6 +19,9 @@ fullscreen #f
 win-width 800
 win-height 600
 
+# Screenshot settings
+screenshot-file-extension .jpg
+
 # Loader settings
 load-file-type toontown
 compress-channels #t

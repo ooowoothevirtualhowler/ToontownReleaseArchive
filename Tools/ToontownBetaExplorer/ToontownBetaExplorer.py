@@ -19,12 +19,22 @@ BETA_INSTALL_PATH = "../../Releases/ToontownBeta/1.0.5-install"
 import sys
 sys.path.append(BETA_INSTALL_PATH + "/phase_2/lib/py")
 sys.path.append(BETA_INSTALL_PATH + "/phase_3/lib/py")
+import time
 
 import Actor
 import libtoontownModules
+from libdirectGlobals import takeSnapshot
+import ToontownGlobals
+import DirectObject
+import Vec4
 from DepthTestProperty import *
 from DepthTestTransition import *
 from DepthWriteTransition import *
+import ClockObject
+from DirectNotifyGlobal import directNotify
+
+globalClock = ClockObject.ClockObject.getGlobalClock()
+notify = directNotify.newCategory('ToontownBetaExplorer')
 
 # Store a dictionary of actor files and their file path. This is used for loading animation.
 ACTOR_REFERENCE = {
@@ -59,6 +69,13 @@ TOON_ACTOR_ELEMENTS = (
 
 NON_ACTOR_SUBSTRINGS = ('-1500', '-1000', '-1200', '-500', '-250', '-800', '-400', '-mod', '-heads')
 
+PROP_ACTOR_ELEMENTS = (
+    ['1dollar-bill', 'anvil', 'banana-peel', 'birthday-cake', 'calculator', 'clip-on-tie', 'feather', 'firehose',
+     'cubes', 'flowerpot', 'glass', 'hypnotize', 'marbles', 'piano', 'propeller', 'rake', 'rake-step',
+     'rubber-stamp-pad', 'safe', 'sandbag', 'sharpener', 'smile', 'splat', 'tnt', 'weight'],
+    ['mod']
+)
+
 
 def product(*args, **kwds):
     """
@@ -91,16 +108,86 @@ TOON_BOOK_ANIMS = (
     ['head', 'torso', 'legs'],
     ['book']
 )
-# Generate cartesian product of TOON_BOOK_ANIMS and append to TOON_BOOK_ANIM_PATHS to store all Toon base models.
+# Generate cartesian product of TOON_BOOK_ANIMS and append to TOON_BOOK_ANIM_PATHS.
 for element in product(*TOON_BOOK_ANIMS):
     baseModel = '-'.join(element)  # Join all parts with '-'
     TOON_BOOK_ANIM_PATHS.append(baseModel)
 
+# Generate cartesian product of PROP_ACTOR_ELEMENTS and append to ACTOR_REFERENCE to store all Battle Prop models.
+for element in product(*PROP_ACTOR_ELEMENTS):
+    baseModel = '-'.join(element)  # Join all parts with '-'
+    ACTOR_REFERENCE[baseModel] = 'phase_5/models/props'
 
-class ToontownBetaLoader:
+
+class ToontownBetaLoader(DirectObject.DirectObject):
     """
     Loader class for Toontown Beta files.
     """
+    def __init__(self):
+        # Use these to override the default paths because the default paths don't have
+        # '../../Releases/ToontownBeta/1.0.5-install/'
+        sndClick = base.loadSfx('../../Releases/ToontownBeta/1.0.5-install/phase_3/audio/sfx/GUI_create_toon_fwd.mp3')
+        sndRollover = base.loadSfx('../../Releases/ToontownBeta/1.0.5-install/phase_3/audio/sfx/GUI_rollover.mp3')
+        import GuiGlobals
+        GuiGlobals.sndRollover = sndRollover
+        GuiGlobals.sndClick = sndClick
+        GuiGlobals.setDefaultFont(ToontownGlobals.getInterfaceFont())
+        GuiGlobals.setDefaultPanel('phase_3/models/props/panel')
+        import DirectGuiGlobals
+        DirectGuiGlobals.sndRollover = sndRollover
+        DirectGuiGlobals.sndClick = sndClick
+        DirectGuiGlobals.setDefaultFont(ToontownGlobals.getInterfaceFont())
+        import DialogBox
+        self.popup = DialogBox.DialogBox(style=DialogBox.Acknowledge, doneEvent='popup-done')
+        self.popup.hide()
+        self.accept('popup-done', self.closePopUp)
+        self.exitUponPopupClose = 0
+
+        # Set the background color to the default in newer Panda versions
+        # so we can actually see everything
+        base.win.getGsg().setColorClearValue(Vec4.Vec4(0.5, 0.5, 0.5, 1))
+
+        # Screenshot
+        self.accept('f9', self.screenshot)
+
+    def screenshot(self):
+        """
+        Takes a screenshot
+        """
+        # We're using this instead of ShowBase so we can create jpg files
+        # The file extension can be changed in configrc
+        date = time.ctime(time.time())
+        frameCount = globalClock.getFrameCount()
+        date = date.replace(' ', '-')
+        date = date.replace(':', '-')
+        imageName = 'tt-beta-explorer' + '-' + date + '-' + str(frameCount) + \
+                    base.config.GetString('screenshot-file-extension', '.jpg')
+        takeSnapshot(base.win, imageName)
+        screenshotMsg = 'Screenshot taken. Check the ToontownBetaExplorer folder.'
+        self.notifyPopUp(screenshotMsg, 0)
+        notify.info(screenshotMsg)
+
+    def notifyPopUp(self, text, exitUponClose=1):
+        """
+        Creates a little pop up box on the screen with text.
+
+        Args:
+            text (string): The message to display in the pop up box.
+            exitUponClose (bool): Whether to terminate the program upon closing the pop up box or not.
+        """
+        self.popup.setMessage(text)
+        self.popup.show()
+        self.exitUponPopupClose = exitUponClose
+
+    def closePopUp(self):
+        """
+        Closes the pop up box and terminates the program if exitUponPopupClose is true.
+        """
+        self.popup.hide()
+        if self.exitUponPopupClose:
+            sys.exit()
+        else:
+            self.exitUponPopupClose = 0
 
     def loadFile(self, filePath):
         """
@@ -116,7 +203,9 @@ class ToontownBetaLoader:
             # Handle DNA files, used for levels
             self.loadDNA(filePath)
         else:
-            TypeError("Sorry, that file format isn't supported! Try dropping in a '.bam' or '.dna' file.")
+            badFileMsg = "Sorry, that file format isn't supported! Try dropping in a '.bam' or '.dna' file."
+            self.notifyPopUp(badFileMsg)
+            notify.warning(badFileMsg)
 
     def loadBam(self, filePath):
         """
@@ -125,24 +214,30 @@ class ToontownBetaLoader:
         Args:
             filePath (string): Path to Bam file to load.
         """
-        isAnimation = 1
+        # 0 for model, 1 for anim
+        typeFlag = 0
 
         # First, we need to check if this Bam file is an animation.
-        for substr in NON_ACTOR_SUBSTRINGS:
-            if filePath.find(substr) > -1:
-                # It's definitely not an animation
-                isAnimation = 0
-        if isAnimation:
+        geom = base.loader.loadModel(filePath)
+
+        if not typeFlag:
+            node = geom.find('**/+AnimBundleNode;+s')
+            if not node.isEmpty():
+                # It's an Anim
+                geom.removeNode()
+                typeFlag = 1
+
+        if typeFlag:
             for actorBase, actorPhase in ACTOR_REFERENCE.items():
                 actorBaseShortened = actorBase
+
+                # This improves the accuracy of finding the model
                 for substr in NON_ACTOR_SUBSTRINGS:
                     removingIdx = actorBase.find(substr)
                     if removingIdx > -1:
                         actorBaseShortened = actorBase[:removingIdx]
-                if filePath.find(actorBaseShortened) > -1:
-                    # If the file name is found in the Actor Reference, treat
-                    # this file as an animation
 
+                if filePath.find(actorBaseShortened) > -1:
                     # Special case for the 'book' animation on toons so it doesn't load
                     # the book model
                     if actorBaseShortened == 'book':
@@ -150,6 +245,7 @@ class ToontownBetaLoader:
                             if filePath.find(substr) > -1:
                                 actorBase = substr[:-4] + '1000'
                                 actorPhase = 'phase_3/models/char'
+
                     # Special case for Mickey's animations; both ToonTag Mickey
                     # and the early version of normal Mickey share the same animation
                     # filenames so we have to differentiate them based on the
@@ -162,11 +258,10 @@ class ToontownBetaLoader:
                     geom.loop('anim')
                     break
 
-        # If it's not an animation, just load a regular ol' bam file
-        if not isAnimation:
-            geom = base.loader.loadModel(filePath)
-
         geom.reparentTo(render)
+
+        self.notifyPopUp('Successfully loaded "%s"!' % filePath, 0)
+
         return geom
 
     def loadDNA(self, filePath, loadSky=1):
@@ -178,7 +273,11 @@ class ToontownBetaLoader:
         """
         fileParts = filePath.split('/')
         if fileParts[-1].find('storage') > -1:
-            raise ValueError("Storage files just contain model definitions for other DNA files, so there's nothing to display! Try a non-storage DNA file.")
+            storageMsg = "Storage files just contain model definitions for other DNA files, " \
+                         "so there's nothing to display! Try a non-storage DNA file."
+            self.notifyPopUp(storageMsg)
+            notify.warning(storageMsg)
+            return
 
         # Load global DNA storage files
         storage = libtoontownModules.DNAStorage()
@@ -244,6 +343,8 @@ class ToontownBetaLoader:
             sky.arc().setTransition(dw, 1)
             sky.arc().setTransition(dt, 1)
             sky.setBin('background', -100)
+
+        self.notifyPopUp('Successfully loaded "%s"!' % filePath, 0)
 
         return geom
 
